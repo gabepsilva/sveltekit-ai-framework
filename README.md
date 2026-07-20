@@ -1,5 +1,7 @@
 # Weltkit
 
+[![CI](https://github.com/gabepsilva/sveltekit-ai-framework/actions/workflows/ci.yml/badge.svg)](https://github.com/gabepsilva/sveltekit-ai-framework/actions/workflows/ci.yml)
+
 An experimental SvelteKit foundation designed for development driven primarily by AI agents. The repository emphasizes deterministic, reviewable quality gates before application features are added.
 
 ## Requirements
