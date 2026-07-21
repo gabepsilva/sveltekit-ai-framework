@@ -39,6 +39,6 @@ Generated reports are written under `coverage/`, `playwright-report/`, and `repo
 
 The `main` branch is protected by the hosted `CI / Quality and security` check. The Codex review job is advisory and runs only after deterministic CI succeeds. It is enabled for same-repository pull requests after the repository secret `OPENAI_API_KEY` is configured.
 
-Repository-specific agent and review rules live in `AGENTS.md`. Workshop setup and the full before/current quality table live in `Basic Start.md`.
+Repository-specific agent and review rules live in `AGENTS.md`. The detailed rationale and implementation for every quality control live in `QUALITY.md`. Workshop setup and the full before/current quality table live in `Basic Start.md`.
 
 Deployment configuration is intentionally deferred until the target environment and SvelteKit adapter are selected.
