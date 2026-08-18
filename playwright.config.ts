@@ -18,6 +18,12 @@ export default defineConfig({
 		reuseExistingServer: !isCI
 	},
 	testMatch: '**/*.e2e.{ts,js}',
+	// A human reporter, a machine-readable one, and the HTML report for humans.
+	reporter: [
+		['list'],
+		['json', { outputFile: 'reports/quality/playwright.json' }],
+		['html', { open: 'never' }]
+	],
 	forbidOnly: true,
 	failOnFlakyTests: true,
 	retries: isCI ? 1 : 0,

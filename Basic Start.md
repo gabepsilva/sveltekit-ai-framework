@@ -76,11 +76,17 @@ Here `bun ci` installs the lockfile exactly; `bun run ci` executes the project q
 Install Docker and keep its daemon running. The scanners stay outside the Bun dependency tree: each uses a digest-pinned image, writes a local report, and removes its container when finished.
 
 ```bash
-bun run security:static      # Gitleaks history/tree, Semgrep source, and Trivy dependency/config
-bun run test:e2e:security    # Playwright Chromium through the ZAP proxy
+bun run security:blocking    # Gitleaks history/tree and Semgrep source
+bun run security:advisory    # Trivy dependencies/config and ZAP-proxied Chromium
 bun run security             # all four security scanners
-bun run ci                   # the complete quality and security gate
+bun run ci                   # the complete merge gate
+bun run nightly              # the scheduled advisory scanners alone
 ```
+
+Gitleaks and Semgrep are derived from repository content, so they reproduce exactly and
+block a merge. Trivy refreshes its vulnerability database and ZAP observes live traffic,
+so both can change verdict with no code change; gating on them would contradict the
+determinism promised above. They run on a schedule instead and open an issue.
 
 | Scanner  | Gate                                                                | Report                                      |
 | -------- | ------------------------------------------------------------------- | ------------------------------------------- |
@@ -95,7 +101,12 @@ Current baseline: Gitleaks and Semgrep have 0 findings; Trivy has 1 Low and 0 Hi
 
 ## 6. Enforce the gate on GitHub
 
-The pinned GitHub Actions workflow installs the exact Bun version and lockfile, installs all three browser engines, runs `bun run ci`, and uploads reports. Protect `main` by requiring `CI / Quality and security` and pull requests.
+The pinned GitHub Actions workflow installs the exact Bun version and lockfile, then runs the
+gates as parallel jobs: static analysis, unit and mutation, build and budgets, end-to-end across
+three engines, and blocking security. Each uploads its reports, and `all-green` passes only when
+every one succeeds, so a formatting failure surfaces in about a minute instead of behind half an
+hour of browser and container work. Protect `main` by requiring `CI / Quality and security` and
+pull requests.
 
 Codex runs afterward as a read-only advisory reviewer when `OPENAI_API_KEY` exists. Its CLI, model, prompt, permissions, and action commit are pinned, but its judgment remains probabilistic and therefore does not block merges.
 

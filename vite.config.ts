@@ -1,6 +1,7 @@
 import { defineConfig } from 'vitest/config';
+import thresholds from './quality/thresholds.json' with { type: 'json' };
 import { playwright } from '@vitest/browser-playwright';
-import adapter from '@sveltejs/adapter-auto';
+import adapter from '@sveltejs/adapter-node';
 import { sveltekit } from '@sveltejs/kit/vite';
 
 export default defineConfig({
@@ -12,9 +13,9 @@ export default defineConfig({
 					filename.split(/[/\\]/).includes('node_modules') ? undefined : true
 			},
 
-			// adapter-auto only supports some environments, see https://svelte.dev/docs/kit/adapter-auto for a list.
-			// If your environment is not supported, or you settled on a specific environment, switch out the adapter.
-			// See https://svelte.dev/docs/kit/adapters for more information about adapters.
+			// Pinned so `bun run build` proves a deployable artifact rather than
+			// succeeding while adapting to nothing. A consuming app may swap this
+			// for its own target: https://svelte.dev/docs/kit/adapters
 			adapter: adapter()
 		})
 	],
@@ -27,12 +28,9 @@ export default defineConfig({
 			provider: 'istanbul',
 			reporter: ['text', 'json-summary', 'html'],
 			exclude: ['src/**/*.d.ts', 'src/**/*.{test,spec}.{js,ts}'],
-			thresholds: {
-				lines: 80,
-				functions: 80,
-				branches: 80,
-				statements: 80
-			}
+			// Guarded by scripts/quality/thresholds.ts; perFile stops one
+			// well-covered file from masking an uncovered one.
+			thresholds: thresholds.coverage
 		},
 		projects: [
 			{
