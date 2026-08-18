@@ -56,6 +56,51 @@ export async function run(
 	return exitCode;
 }
 
+export interface CaptureResult {
+	exitCode: number;
+	/** stdout and stderr interleaved, for logs and human output. */
+	output: string;
+	/** stdout alone, for callers parsing machine-readable output. */
+	stdout: string;
+	stderr: string;
+}
+
+/**
+ * Runs a command to completion, collecting stdout and stderr instead of failing
+ * on a non-zero exit. Callers decide what a non-zero status means.
+ */
+export async function captureStatus(
+	command: string,
+	args: string[],
+	options: { stream?: boolean; env?: NodeJS.ProcessEnv; cwd?: string } = {}
+): Promise<CaptureResult> {
+	const combined: string[] = [];
+	const out: string[] = [];
+	const err: string[] = [];
+	const exitCode = await new Promise<number>((resolve, reject) => {
+		const child = spawn(command, args, {
+			cwd: options.cwd ?? projectRoot,
+			env: options.env ?? process.env,
+			stdio: ['ignore', 'pipe', 'pipe']
+		});
+		for (const [stream, sink] of [
+			[child.stdout, out],
+			[child.stderr, err]
+		] as const) {
+			stream.setEncoding('utf8');
+			stream.on('data', (chunk: string) => {
+				sink.push(chunk);
+				combined.push(chunk);
+				if (options.stream === true) process.stdout.write(chunk);
+			});
+		}
+		child.on('error', reject);
+		child.on('close', (code) => resolve(code ?? 1));
+	});
+
+	return { exitCode, output: combined.join(''), stdout: out.join(''), stderr: err.join('') };
+}
+
 export async function capture(command: string, args: string[]): Promise<string> {
 	const { stdout } = await execFileAsync(command, args, {
 		cwd: projectRoot,

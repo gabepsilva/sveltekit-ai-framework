@@ -1,3 +1,9 @@
+import { readFileSync } from 'node:fs';
+
+const { mutation } = JSON.parse(
+	readFileSync(new URL('./quality/thresholds.json', import.meta.url), 'utf8')
+);
+
 /** @type {import('@stryker-mutator/api/core').PartialStrykerOptions} */
 export default {
 	coverageAnalysis: 'perTest',
@@ -20,11 +26,10 @@ export default {
 	reporters: ['clear-text', 'progress', 'html', 'json'],
 	htmlReporter: { fileName: 'reports/mutation/mutation.html' },
 	jsonReporter: { fileName: 'reports/mutation/mutation.json' },
-	thresholds: {
-		high: 90,
-		low: 80,
-		break: 80
-	},
+	thresholds: { high: mutation.high, low: mutation.low, break: mutation.break },
+	// Only re-mutate what changed. The file is cached in CI, not committed.
+	incremental: true,
+	incrementalFile: 'reports/mutation/stryker-incremental.json',
 	concurrency: 2,
 	cleanTempDir: 'always'
 };

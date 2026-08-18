@@ -32,14 +32,40 @@ After completing the code, ask the user if they want a playground link. Only cal
 
 ## Quality Gate
 
-- Before declaring implementation work complete, run `bun run verify`.
-- Run `bun run ci` when browser dependencies are available or when changing user-facing behavior.
-- Run `bun run security` when changing authentication, authorization, input handling, dependencies, HTTP behavior, or security configuration.
-- Run `bun run test:mutation` when changing reusable domain or validation logic.
+Every tier runs to completion rather than stopping at the first failure, and writes
+`reports/quality/gate-<tier>.json`. Read that file: it lists each step, its exit code,
+its log path, and its machine-readable artifact. Do not scrape the human output.
+
+| Command               | Runs                                              | Needs            |
+| --------------------- | ------------------------------------------------- | ---------------- |
+| `bun run precommit`   | Formatting, lint, suppression ratchet. Fail-fast. | Nothing          |
+| `bun run verify:fast` | Every static check plus server unit tests.        | Nothing          |
+| `bun run verify`      | Adds workflow lint, coverage, build, budgets.     | Docker, Chromium |
+| `bun run verify:deep` | Adds mutation testing and end-to-end flows.       | Docker, browsers |
+| `bun run ci`          | Adds the blocking security scanners.              | Docker, browsers |
+| `bun run nightly`     | Trivy and ZAP. Scheduled, never a merge gate.     | Docker, Chromium |
+
+- Run `bun run verify:fast` after each change; it needs no Docker and no browser.
+- Run `bun run verify` before declaring implementation work complete.
+- Run `bun run verify:deep` when changing user-facing behavior or reusable domain logic.
+- Run `bun run ci` when changing authentication, authorization, input handling, dependencies,
+  HTTP behavior, or security configuration.
+- Re-run one step with `bun scripts/quality/gate.ts <tier> --only <step>`.
 - Never suppress or downgrade diagnostics merely to make a check pass.
-- Never lower coverage thresholds, skip tests, focus tests, or update snapshots without explicit authorization.
+- Never lower coverage thresholds, skip tests, focus tests, or update snapshots without
+  explicit authorization.
+- A suppression comment requires an issue key or URL on its line or the line above it.
+  `bun run check:suppressions` fails when unjustified suppressions exceed the recorded
+  baseline. Raising that baseline is a deliberate, reviewed change, never a fix.
+- `bun run check:thresholds` guards the numbers that decide whether a gate passes:
+  coverage, mutation score, bundle budgets, duplication, and the suppression baseline.
+  Lowering any of them fails the gate. The ratchet stops a diagnostic being silenced;
+  this stops the bar being moved instead.
+- `bun run test:gates` proves every gate rejects the input it claims to reject, using
+  fixtures generated at run time. A new gate is not finished until it has a fixture.
 - Never add a security-scanner exception without a documented finding reference and justification.
-- Changes to quality configuration, CI scripts, scanner policies, container digests, snapshots, or `bun.lock` require deliberate review.
+- Changes to quality configuration, CI scripts, scanner policies, container digests, snapshots,
+  the suppression baseline, or `bun.lock` require deliberate review.
 
 ## Review guidelines
 

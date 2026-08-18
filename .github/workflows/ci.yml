@@ -14,13 +14,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  quality-and-security:
-    name: Quality and security
+  # Every gate below runs to completion and writes reports/quality/gate-*.json.
+  # An agent reads that file instead of scraping thirteen text formats.
+  static:
+    name: Static analysis
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    env:
-      E2E_ALL_BROWSERS: '1'
-
+    timeout-minutes: 15
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -38,34 +37,355 @@ jobs:
         with:
           bun-version: 1.3.9
 
+      - name: Restore Bun package cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
       - name: Install locked dependencies
         run: bun install --frozen-lockfile
 
-      - name: Install browser runtimes
-        run: bunx playwright install --with-deps chromium firefox webkit
+      - name: Restore scanner image and rule cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          # Trivy's database and Semgrep's hash-verified rule pack live here, not
+          # in ~/.cache. The scanner images are saved here too: a `docker pull`
+          # per run costs more than restoring them.
+          path: .security-cache
+          key: security-cache-${{ runner.os }}-${{ hashFiles('scripts/security/config.ts') }}
+          restore-keys: security-cache-${{ runner.os }}-
 
-      - name: Run complete gate
-        run: bun run ci
+      - name: Warm pinned scanner images
+        run: bun run security:images actionlint
 
-      - name: Upload quality and security reports
+      - name: Run static gate
+        run: bun scripts/quality/gate.ts ci --job static
+
+      - name: Upload static reports
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: quality-reports-${{ github.run_id }}-${{ github.run_attempt }}
+          name: static-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            reports/
+
+  unit:
+    name: Unit, component, and mutation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: 24.18.0
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.9
+
+      - name: Restore Bun package cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - name: Install locked dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Restore Playwright browser cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-chromium-${{ hashFiles('bun.lock') }}
+
+      - name: Install browser runtimes
+        run: bunx playwright install --with-deps chromium
+
+      - name: Restore Stryker incremental state
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: reports/mutation/stryker-incremental.json
+          key: stryker-${{ runner.os }}-${{ github.sha }}
+          restore-keys: stryker-${{ runner.os }}-
+
+      - name: Run coverage and mutation gates
+        run: bun scripts/quality/gate.ts ci --job unit
+
+      - name: Upload unit reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: unit-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: warn
           retention-days: 14
           path: |
             coverage/
+            reports/
+
+  build:
+    name: Build and bundle budget
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: 24.18.0
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.9
+
+      - name: Restore Bun package cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - name: Install locked dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Run build gate
+        run: bun scripts/quality/gate.ts ci --job build
+
+      - name: Upload build reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: build-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            reports/
+
+  e2e:
+    name: End-to-end
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      E2E_ALL_BROWSERS: '1'
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: 24.18.0
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.9
+
+      - name: Restore Bun package cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - name: Install locked dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Restore Playwright browser cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-chromium-firefox-webkit-${{ hashFiles('bun.lock') }}
+
+      - name: Install browser runtimes
+        run: bunx playwright install --with-deps chromium firefox webkit
+
+      - name: Run end-to-end gate
+        run: bun scripts/quality/gate.ts ci --job e2e
+
+      - name: Upload e2e reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
             playwright-report/
             reports/
             test-results/
+
+  security:
+    name: Security (blocking)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: 24.18.0
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.9
+
+      - name: Restore Bun package cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - name: Install locked dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Restore scanner image and rule cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          # Trivy's database and Semgrep's hash-verified rule pack live here, not
+          # in ~/.cache. The scanner images are saved here too: a `docker pull`
+          # per run costs more than restoring them.
+          path: .security-cache
+          key: security-cache-${{ runner.os }}-${{ hashFiles('scripts/security/config.ts') }}
+          restore-keys: security-cache-${{ runner.os }}-
+
+      - name: Warm pinned scanner images
+        run: bun run security:images gitleaks semgrep
+
+      # Gitleaks and Semgrep are code-derived and deterministic, so they block a
+      # merge. Trivy and ZAP depend on feeds that change without a code change;
+      # gating on them would contradict the determinism this repo promises. They
+      # run in nightly.yml instead.
+      - name: Run blocking security gate
+        run: bun scripts/quality/gate.ts ci --job security
+
+      - name: Upload security reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: security-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            reports/
+
+  self-test:
+    name: Gate self-test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: 24.18.0
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.9
+
+      - name: Restore Bun package cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - name: Install locked dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Restore scanner image and rule cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: .security-cache
+          key: security-cache-${{ runner.os }}-${{ hashFiles('scripts/security/config.ts') }}
+          restore-keys: security-cache-${{ runner.os }}-
+
+      - name: Warm pinned scanner images
+        run: bun run security:images actionlint gitleaks semgrep
+
+      - name: Restore Playwright browser cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-chromium-firefox-${{ hashFiles('bun.lock') }}
+
+      - name: Install browser runtimes
+        run: bunx playwright install --with-deps chromium firefox
+
+      # Proves each gate rejects input it claims to reject. Without this, every
+      # threshold in the repository is an assertion nobody has tested.
+      - name: Run gate self-test
+        run: bun scripts/quality/gate.ts ci --job self-test
+
+      - name: Upload self-test reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: self-test-reports-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            reports/
+
+  all-green:
+    name: Quality and security
+    if: always()
+    needs: [static, unit, build, e2e, security, self-test]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every gate to pass
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "Gate results: $RESULTS"
+          for result in $RESULTS; do
+            if [[ "$result" != "success" ]]; then
+              echo "::error::A required gate did not succeed."
+              exit 1
+            fi
+          done
 
   codex-review:
     name: Codex advisory review
     if: >-
       github.event_name == 'pull_request' &&
       github.event.pull_request.head.repo.full_name == github.repository
-    needs: quality-and-security
+    needs: all-green
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
